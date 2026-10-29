@@ -3,7 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "css": "node scripts/build-css.mjs",
+    "pdf": "node scripts/generate-pdf.mjs",
+    "predev": "node scripts/build-css.mjs && node scripts/generate-pdf.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/build-css.mjs && node scripts/generate-pdf.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
