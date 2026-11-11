@@ -62,6 +62,31 @@ function pickTarget(taken) {
   return list[0];
 }
 
+const REVIEW = ".card,.btn,.portrait,.pill,.chip,.sk,.tag,h2,h3,h4,p,.lead,.hl li,.stats strong,.num,.kv b,.eyebrow";
+const REVIEW_LABELS = ["reviewing layout", "checking contrast", "optimizing spacing", "a11y check", "linting copy", "testing responsive"];
+const reviewTask = () => ({ kind: "review", label: REVIEW_LABELS[rnd(REVIEW_LABELS.length)], dur: APPROACH + 800 });
+
+const inView = (el) => {
+  const r = el.getBoundingClientRect();
+  if (r.width < 8 || r.height < 6) return false;
+  if (r.top < 64 || r.bottom > window.innerHeight - 60 || r.left < -2 || r.right > window.innerWidth + 2) return false;
+  const rv = el.closest(".reveal");
+  return !(rv && !rv.classList.contains("done"));
+};
+
+// helpers for agents with no main work left: fill in small labels, else review built elements
+function pickSmall(taken) {
+  const list = [...document.querySelectorAll(SMALL)].filter((el) => !taken.has(el) && isPre(el) && !el.closest(SKIP) && inView(el));
+  list.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+  return list[0] || null;
+}
+function pickReview(taken, reviewed) {
+  const list = [...document.querySelectorAll(REVIEW)].filter(
+    (el) => !taken.has(el) && !reviewed.has(el) && !isPre(el) && !el.closest(SKIP) && !el.classList.contains("ag-focus") && inView(el)
+  );
+  return list.length ? list[rnd(list.length)] : null;
+}
+
 function caretRect(fx) {
   let idx = -1;
   for (let i = 0; i < fx.nodes.length; i++) if (fx.nodes[i].data.length) idx = i;
@@ -97,6 +122,8 @@ export function CursorField() {
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const A = agents.current;
     const taken = new Set();
+    const reviewed = new WeakSet();
+    let ahead = false; // is there an unbuilt block further down the page?
     const pres = new Set();
     const seen = new Map();
     const timers = [];
@@ -159,6 +186,7 @@ export function CursorField() {
         }
       });
       store.pending = pending;
+      ahead = !!document.querySelector(".reveal:not(.done)");
     }, 300);
 
     const restore = (a) => {
@@ -180,6 +208,11 @@ export function CursorField() {
       if (el && a.task) {
         restore(a);
         el.classList.remove("ag-focus");
+        if (ok && a.task.kind === "review") {
+          el.style.setProperty("--ag", COLORS[a.i]);
+          el.classList.add("ag-pop");
+          setTimeout(() => el.classList.remove("ag-pop"), 1000);
+        }
         if (ok && a.task.kind !== "build") {
           const name = el.matches(".portrait") ? "profile photo" : (el.innerText || "element").replace(/\s+/g, " ").slice(0, 28);
           store.log(`agent-0${a.i + 1}`, `${a.task.label} · ${name}`, COLORS[a.i]);
@@ -270,7 +303,17 @@ export function CursorField() {
         if (!a.busy && now >= a.nextAt && !reduce) {
           const el = pickTarget(taken);
           if (el) start(a, el, taskFor(el));
-          else a.nextAt = now + 250;
+          else {
+            const sm = pickSmall(taken);
+            if (sm) start(a, sm, taskFor(sm));
+            else {
+              const rv = pickReview(taken, reviewed);
+              if (rv) {
+                reviewed.add(rv);
+                start(a, rv, reviewTask());
+              } else a.nextAt = now + 300;
+            }
+          }
         }
 
         let tx = a.x;
@@ -320,6 +363,9 @@ export function CursorField() {
             r = a.el.getBoundingClientRect();
             tx = r.right;
             ty = r.bottom;
+          } else if (kind === "review") {
+            tx = r.left + r.width * (0.1 + 0.8 * p);
+            ty = r.top + r.height * (0.3 + 0.4 * p);
           }
           k = t < APPROACH ? 0.2 : 0.38;
 
@@ -341,7 +387,13 @@ export function CursorField() {
           finish(a, false);
         } else {
           if (sel) sel.style.opacity = 0;
-          if (lab) lab.textContent = `agent-0${i + 1}`;
+          if (ahead && !reduce) {
+            // nothing to do on screen: scout the next block below
+            tx = 60 + (i / (AGENT_COUNT - 1)) * (window.innerWidth - 120);
+            ty = vh - 105;
+            k = 0.05;
+            if (lab) lab.textContent = `agent-0${i + 1} · scouting ahead`;
+          } else if (lab) lab.textContent = `agent-0${i + 1}`;
         }
         a.x = lerp(a.x, tx, k);
         a.y = lerp(a.y, ty, k);
